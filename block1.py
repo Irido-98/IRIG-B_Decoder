@@ -87,3 +87,84 @@ for w in pulse_widths_ms:
 print(f"Classified {len(symbols)} symbols")
 print(f"Symbol string: {''.join(symbols)}")
 
+# ============================================================
+# Block 3: frame synchronisation and time decode
+# ============================================================
+
+# --- SWITCH: choose how many frames to decode ---
+#   "single" -> decode only the first complete frame
+#   "all"    -> decode every complete frame in the capture
+DECODE_MODE = "decode"   # change to "all" to decode every frame
+
+
+def find_frame_starts(symbols):
+    """Return the index of each reference marker (the 2nd M of an MM pair).
+    The frame's data bits begin at the position AFTER this index."""
+    starts = []
+    for i in range(len(symbols) - 1):
+        if symbols[i] == 'M' and symbols[i + 1] == 'M':
+            starts.append(i + 1)   # i+1 is Pr, the reference marker
+    return starts
+
+
+def bcd_field(bits, weights):
+    """Decode one little-endian BCD field.
+    bits:    list of '0'/'1' characters for this field
+    weights: the value of each bit position, e.g. [1,2,4,8]
+    Returns the decimal value of the field."""
+    value = 0
+    for bit, weight in zip(bits, weights):
+        if bit == '1':
+            value += weight
+    return value
+
+
+def decode_frame(symbols, start):
+    """Decode the time-of-day from one frame.
+    'start' is the index of the reference marker Pr (position 0).
+    Data bits are at start+1, start+2, ... relative to Pr."""
+    # Pull out 100 bit-slots following the reference marker. We index
+    # relative to 'start' so position p in the frame is symbols[start + p].
+    def bit(p):
+        return symbols[start + p]
+
+    # Seconds: units in bits 1-4, tens in bits 6-8 (little-endian)
+    sec_units = bcd_field([bit(1), bit(2), bit(3), bit(4)], [1, 2, 4, 8])
+    sec_tens  = bcd_field([bit(6), bit(7), bit(8)],          [10, 20, 40])
+    seconds = sec_tens + sec_units
+
+    # Minutes: units in bits 10-13, tens in bits 15-17
+    min_units = bcd_field([bit(10), bit(11), bit(12), bit(13)], [1, 2, 4, 8])
+    min_tens  = bcd_field([bit(15), bit(16), bit(17)],           [10, 20, 40])
+    minutes = min_tens + min_units
+
+    # Hours: units in bits 20-23, tens in bits 25-26
+    hour_units = bcd_field([bit(20), bit(21), bit(22), bit(23)], [1, 2, 4, 8])
+    hour_tens  = bcd_field([bit(25), bit(26)],                    [10, 20])
+    hours = hour_tens + hour_units
+
+    return hours, minutes, seconds
+
+
+# --- Run it according to the switch ---
+frame_starts = find_frame_starts(symbols)
+print(f"Found {len(frame_starts)} frame start(s) at symbol indices: {frame_starts}")
+
+if DECODE_MODE == "single":
+    # Decode just the first complete frame. A frame needs 100 bits after
+    # Pr, so only attempt it if enough symbols follow the marker.
+    decoded = False
+    for start in frame_starts:
+        if start + 26 < len(symbols):   # need at least up to bit 26 (hours)
+            h, m, s = decode_frame(symbols, start)
+            print(f"Decoded time: {h:02d}:{m:02d}:{s:02d}")
+            decoded = True
+            break
+    if not decoded:
+        print("No complete frame found in capture.")
+
+elif DECODE_MODE == "all":
+    for start in frame_starts:
+        if start + 26 < len(symbols):
+            h, m, s = decode_frame(symbols, start)
+            print(f"Frame at index {start}: {h:02d}:{m:02d}:{s:02d}")
