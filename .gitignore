@@ -1,0 +1,10 @@
+# Captured bench data — never commit
+*.csv
+
+# Python cruft
+__pycache__/
+*.pyc
+
+# Virtual environment, if you add one later
+venv/
+.venv/
